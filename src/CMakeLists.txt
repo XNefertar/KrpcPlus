@@ -6,6 +6,9 @@
 #get_filename_component(SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR} ABSOLUTE)
 #file(GLOB_RECURSE SRC_FILES ${SRC_DIR}/*.cc)
 #获取当前目录下的所有源文件
+
+add_definitions(-DTHREADED)
+
 file(GLOB SRC_FILES ${CMAKE_CURRENT_SOURCE_DIR}/*.cc)
 
 # 获取 protobuf 的生成文件
