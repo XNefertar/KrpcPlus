@@ -2,6 +2,7 @@
 #define _Krpcchannel_h_
 // 此类是继承自google::protobuf::RpcChannel
 // 目的是为了给客户端进行方法调用的时候，统一接收的
+#include <unistd.h>
 #include <google/protobuf/service.h>
 #include "zookeeperutil.h"
 class KrpcChannel : public google::protobuf::RpcChannel
