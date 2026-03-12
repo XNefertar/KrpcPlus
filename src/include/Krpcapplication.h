@@ -10,12 +10,9 @@ class KrpcApplication
     public:
     static void Init(int argc,char **argv);
     static KrpcApplication & GetInstance();
-    static void deleteInstance();
     static Krpcconfig& GetConfig();
     private:
     static Krpcconfig m_config;
-    static KrpcApplication * m_application;//全局唯一单例访问对象
-    static std::mutex m_mutex;
     KrpcApplication(){}
     ~KrpcApplication(){}
     KrpcApplication(const KrpcApplication&)=delete;
