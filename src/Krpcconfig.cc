@@ -50,6 +50,10 @@ std::string Krpcconfig::Load(const std::string &key) {
     return it->second;  // 返回对应的value
 }
 
+void Krpcconfig::Write(const std::string &key, const std::string &value) {
+    config_map[key] = value;
+}
+
 // 去掉字符串前后的空格
 void Krpcconfig::Trim(std::string &read_buf) {
     // 去掉字符串前面的空格
