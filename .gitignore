@@ -49,3 +49,6 @@ build/
 
 # binary files
 bin/
+
+# vscode files
+.vscode
