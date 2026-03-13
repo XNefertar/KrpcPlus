@@ -3,6 +3,8 @@
 #include "zookeeperutil.h"
 #include "Krpcapplication.h"
 #include "Krpccontroller.h"
+#include "KrpcRouteManager.h"
+#include "KrpcLoadBalancer.h"
 #include "KrpcStat.h"
 #include "memory"
 #include <errno.h>
@@ -188,7 +190,27 @@ std::string KrpcChannel::QueryServiceHost(ZkClient *zkclient, std::string servic
     std::cout << "method_path: " << method_path << std::endl;
 
     std::unique_lock<std::mutex> lock(g_data_mutx);  // 加锁，保证线程安全
-    std::string host_data_1 = zkclient->GetData(method_path.c_str());  // 从ZooKeeper获取数据
+    
+    // 我们需要先触发一次对 ZK 的查询来更新本地路由表，或者发现本地没有时强制去ZK拉取
+    std::vector<std::string> routeNodes = RouteManager::GetInstance()->GetRouteNodes(method_path);
+    if (routeNodes.empty()) {
+        // 如果本地路由表没有缓存，尝试同步去ZK拉取一次并注册Watch
+        RouteManager::GetInstance()->UpdateRouteTable(method_path, zkclient, true);
+        routeNodes = RouteManager::GetInstance()->GetRouteNodes(method_path);
+    }
+    
+    // 通过配置选取负载均衡策略
+    std::string lb_type = KrpcApplication::GetConfig().Load("loadbalancer");
+    std::unique_ptr<LoadBalancer> loadBalancer;
+    
+    if (lb_type == "roundrobin") {
+        loadBalancer = std::make_unique<RoundRobinLoadBalancer>();
+    } else {
+        // 默认使用随机负载均衡
+        loadBalancer = std::make_unique<RandomLoadBalancer>();
+    }
+    
+    std::string host_data_1 = loadBalancer->Select(routeNodes);
     lock.unlock();  // 解锁
 
     if (host_data_1 == "") {  // 如果未找到服务地址
