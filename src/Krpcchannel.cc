@@ -3,6 +3,7 @@
 #include "zookeeperutil.h"
 #include "Krpcapplication.h"
 #include "Krpccontroller.h"
+#include "KrpcStat.h"
 #include "memory"
 #include <errno.h>
 #include <unistd.h>
@@ -36,6 +37,7 @@ void KrpcChannel::CallMethod(const ::google::protobuf::MethodDescriptor *method,
                              ::google::protobuf::Message *response,
                              ::google::protobuf::Closure *done)
 {
+    ScopedTimer total(KrpcStat::TOTAL);
     if (-1 == m_clientfd) {  // 如果客户端socket未初始化
         // 获取服务对象名和方法名
         const google::protobuf::ServiceDescriptor *sd = method->service();
@@ -45,7 +47,11 @@ void KrpcChannel::CallMethod(const ::google::protobuf::MethodDescriptor *method,
         // 客户端需要查询ZooKeeper，找到提供该服务的服务器地址
         ZkClient zkCli;
         zkCli.Start();  // 连接ZooKeeper服务器
-        std::string host_data = QueryServiceHost(&zkCli, service_name, method_name, m_idx);  // 查询服务地址
+        std::string host_data;
+        {
+            ScopedTimer zk(KrpcStat::ZK_QUERY);
+            host_data = QueryServiceHost(&zkCli, service_name, method_name, m_idx);  // 查询服务地址
+        }
         m_ip = host_data.substr(0, m_idx);  // 从查询结果中提取IP地址
         std::cout << "ip: " << m_ip << std::endl;
         m_port = atoi(host_data.substr(m_idx + 1, host_data.size() - m_idx).c_str());  // 从查询结果中提取端口号
@@ -63,9 +69,12 @@ void KrpcChannel::CallMethod(const ::google::protobuf::MethodDescriptor *method,
 
      // 2. 序列化请求参数
     std::string args_str;
-    if (!request->SerializeToString(&args_str)) {
-        controller->SetFailed("serialize request fail");
-        return;
+    {
+        ScopedTimer ser(KrpcStat::SERIALIZE_REQ);
+        if (!request->SerializeToString(&args_str)) {
+            controller->SetFailed("serialize request fail");
+            return;
+        }
     }
 
     // 3. 构建协议头
@@ -99,41 +108,47 @@ void KrpcChannel::CallMethod(const ::google::protobuf::MethodDescriptor *method,
     send_rpc_str.append(args_str);
 
     // 发送
-    if (-1 == send(m_clientfd, send_rpc_str.c_str(), send_rpc_str.size(), 0)) {
-        close(m_clientfd);
-        m_clientfd = -1; // 重置
-        controller->SetFailed("send error");
-        return;
-    }
+    {
+        ScopedTimer io(KrpcStat::NET_IO);
+        if (-1 == send(m_clientfd, send_rpc_str.c_str(), send_rpc_str.size(), 0)) {
+            close(m_clientfd);
+            m_clientfd = -1; // 重置
+            controller->SetFailed("send error");
+            return;
+        }
 
-    // 5. 接收响应
-    // 格式：[4B Total Len] + [Response Data]
-    
-    // A. 先读4字节长度头
-    uint32_t response_len = 0;
-    if (recv_exact(m_clientfd, (char*)&response_len, 4) != 4) {
-        close(m_clientfd);
-        m_clientfd = -1;
-        controller->SetFailed("recv response length error");
-        return;
-    }
-    response_len = ntohl(response_len); // 转回主机字节序
+        // 5. 接收响应
+        // 格式：[4B Total Len] + [Response Data]
+        
+        // A. 先读4字节长度头
+        uint32_t response_len = 0;
+        if (recv_exact(m_clientfd, (char*)&response_len, 4) != 4) {
+            close(m_clientfd);
+            m_clientfd = -1;
+            controller->SetFailed("recv response length error");
+            return;
+        }
+        response_len = ntohl(response_len); // 转回主机字节序
 
-    // B. 根据长度读取Body
-    std::vector<char> recv_buf(response_len);
-    if (recv_exact(m_clientfd, recv_buf.data(), response_len) != response_len) {
-        close(m_clientfd);
-        m_clientfd = -1;
-        controller->SetFailed("recv response body error");
-        return;
-    }
-
-    // 6. 反序列化响应
-    if (!response->ParseFromArray(recv_buf.data(), response_len)) {
-        close(m_clientfd);
-        m_clientfd = -1;
-        controller->SetFailed("parse response error");
-        return;
+        // B. 根据长度读取Body
+        std::vector<char> recv_buf(response_len);
+        if (recv_exact(m_clientfd, recv_buf.data(), response_len) != response_len) {
+            close(m_clientfd);
+            m_clientfd = -1;
+            controller->SetFailed("recv response body error");
+            return;
+        }
+        
+        // 6. 反序列化响应
+        {
+            ScopedTimer des(KrpcStat::DESERIALIZE_RES);
+            if (!response->ParseFromArray(recv_buf.data(), response_len)) {
+                close(m_clientfd);
+                m_clientfd = -1;
+                controller->SetFailed("parse response error");
+                return;
+            }
+        }
     }
 }
 

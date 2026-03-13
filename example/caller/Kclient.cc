@@ -6,6 +6,7 @@
 #include <thread>
 #include <chrono>
 #include "KrpcLogger.h"
+#include "KrpcStat.h"
 
 // 发送 RPC 请求的函数，模拟客户端调用远程服务
 void send_request(int thread_id, std::atomic<int> &success_count, std::atomic<int> &fail_count,int requests_per_thread) {
@@ -26,14 +27,14 @@ void send_request(int thread_id, std::atomic<int> &success_count, std::atomic<in
 
         // 检查 RPC 调用是否成功
         if (controller.Failed()) {  // 如果调用失败
-            std::cout << controller.ErrorText() << std::endl;  // 打印错误信息
+            // std::cout << controller.ErrorText() << std::endl;  // 打印错误信息
             fail_count++;  // 失败计数加 1
         } else {  // 如果调用成功
-            if (int{} == response.result().errcode()) {  // 检查响应中的错误码
-                std::cout << "rpc login response success:" << response.success() << std::endl;  // 打印成功信息
+            if (0 == response.result().errcode()) {  // 检查响应中的错误码
+                // std::cout << "rpc login response success:" << response.success() << std::endl;  // 打印成功信息
                 success_count++;  // 成功计数加 1
             } else {  // 如果响应中有错误
-                std::cout << "rpc login response error : " << response.result().errmsg() << std::endl;  // 打印错误信息
+                // std::cout << "rpc login response error : " << response.result().errmsg() << std::endl;  // 打印错误信息
                 fail_count++;  // 失败计数加 1
             }
         }
@@ -77,6 +78,9 @@ const int requests_per_thread = 5000; // 每个线程发 5000 次请求
     LOG(INFO) << "Fail count: " << fail_count;  // 失败请求数
     LOG(INFO) << "Elapsed time: " << elapsed.count() << " seconds";  // 测试耗时
     LOG(INFO) << "QPS: " << (thread_count * requests_per_thread) / elapsed.count();  // 计算 QPS（每秒请求数）
+
+    // 打印性能报告
+    KrpcStat::GetInstance().PrintReport();
 
     return 0;
 }
