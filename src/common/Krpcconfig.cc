@@ -1,4 +1,4 @@
-#include "Krpcconfig.h"
+#include "krpc/common/Krpcconfig.h"
 #include "memory"
 
 // 加载配置文件，解析配置文件中的键值对
@@ -48,6 +48,10 @@ std::string Krpcconfig::Load(const std::string &key) {
         return "";  // 返回空字符串
     }
     return it->second;  // 返回对应的value
+}
+
+void Krpcconfig::Write(const std::string &key, const std::string &value) {
+    config_map[key] = value;
 }
 
 // 去掉字符串前后的空格

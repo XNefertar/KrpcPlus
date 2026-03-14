@@ -74,8 +74,14 @@ void KrpcProvider::Run() {
             std::string method_path = service_path + "/" + mp.first;
             char method_path_data[128] = {0};
             sprintf(method_path_data, "%s:%d", ip.c_str(), port);  // 将IP和端口信息存入节点数据
+            
+            // 先确保该方法的父节点（非临时）存在
+            zkclient.Create(method_path.c_str(), nullptr, 0); 
+            
+            // 将 IP:Port 挂载为临时子节点 
+            std::string route_path = method_path + "/" + method_path_data;
             // ZOO_EPHEMERAL表示这个节点是临时节点，在客户端断开连接后，ZooKeeper会自动删除这个节点
-            zkclient.Create(method_path.c_str(), method_path_data, strlen(method_path_data), ZOO_EPHEMERAL);
+            zkclient.Create(route_path.c_str(), method_path_data, strlen(method_path_data), ZOO_EPHEMERAL);
         }
     }
 

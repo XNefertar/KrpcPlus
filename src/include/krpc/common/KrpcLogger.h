@@ -12,6 +12,7 @@ public:
         google::InitGoogleLogging(argv0);
         FLAGS_colorlogtostderr=true;//启用彩色日志
         FLAGS_logtostderr=true;//默认输出标准错误
+        FLAGS_minloglevel = google::INFO; // 过滤 INFO 级别日志，仅输出 WARNING 及以上级别
       }
       ~KrpcLogger(){
         google::ShutdownGoogleLogging();
