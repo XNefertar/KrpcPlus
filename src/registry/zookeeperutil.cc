@@ -40,6 +40,10 @@ ZkClient::~ZkClient() {
 
 // 启动ZooKeeper客户端，连接ZooKeeper服务器
 void ZkClient::Start() {
+    // 设置 ZooKeeper 库的日志级别，过滤掉 INFO 级别
+    // ZOO_LOG_LEVEL_ERROR (仅错误), ZOO_LOG_LEVEL_WARN (警告+错误), ZOO_LOG_LEVEL_INFO (默认)
+    zoo_set_debug_level(ZOO_LOG_LEVEL_WARN);
+
     // 从配置文件中读取ZooKeeper服务器的IP和端口
     std::string host = KrpcApplication::GetInstance().GetConfig().Load("zookeeperip");
     std::string port = KrpcApplication::GetInstance().GetConfig().Load("zookeeperport");
