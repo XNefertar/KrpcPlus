@@ -1,10 +1,10 @@
 #include <mutex>
 #include <vector>
-#include "zookeeperutil.h"
-#include "Krpcapplication.h"
-#include "KrpcLogger.h"
-#include "KrpcRouteManager.h"
 #include <condition_variable>
+#include "krpc/registry/zookeeperutil.h"
+#include "krpc/common/Krpcapplication.h"
+#include "krpc/common/KrpcLogger.h"
+#include "krpc/registry/KrpcRouteManager.h"
 
 // 全局的watcher观察器，用于接收ZooKeeper服务器的通知
 void global_watcher(zhandle_t *zh, int type, int status, const char *path, void *watcherCtx) {

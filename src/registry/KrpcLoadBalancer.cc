@@ -1,4 +1,4 @@
-#include "KrpcLoadBalancer.h"
+#include "krpc/registry/KrpcLoadBalancer.h"
 
 std::string RoundRobinLoadBalancer::Select(const std::vector<std::string>& nodes) {
     if (nodes.empty()) {

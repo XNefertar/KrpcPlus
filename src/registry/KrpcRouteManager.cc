@@ -1,6 +1,6 @@
 #include <atomic>
-#include "KrpcRouteManager.h"
-#include "KrpcLogger.h"
+#include "krpc/registry/KrpcRouteManager.h"
+#include "krpc/common/KrpcLogger.h"
 
 std::vector<std::string> RouteManager::GetRouteNodes(const std::string& path) const {
     std::shared_ptr<const RouteTable> local_table = std::atomic_load(&_curRouteTable);
