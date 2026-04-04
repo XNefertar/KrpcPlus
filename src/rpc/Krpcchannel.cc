@@ -40,36 +40,14 @@ void KrpcChannel::CallMethod(const ::google::protobuf::MethodDescriptor *method,
                              ::google::protobuf::Closure *done)
 {
     ScopedTimer total(KrpcStat::TOTAL);
-    if (-1 == m_clientfd) {  // 如果客户端socket未初始化
-        // 获取服务对象名和方法名
-        const google::protobuf::ServiceDescriptor *sd = method->service();
-        service_name = sd->name();  // 服务名
-        method_name = method->name();  // 方法名
+    std::string zk_path, address;
+    
+    // 获取服务对象名和方法名
+    const google::protobuf::ServiceDescriptor *sd = method->service();
+    service_name = sd->name();
+    method_name = method->name();
 
-        // 客户端需要查询ZooKeeper，找到提供该服务的服务器地址
-        ZkClient zkCli;
-        zkCli.Start();  // 连接ZooKeeper服务器
-        std::string host_data;
-        {
-            ScopedTimer zk(KrpcStat::ZK_QUERY);
-            host_data = QueryServiceHost(&zkCli, service_name, method_name, m_idx);  // 查询服务地址
-        }
-        m_ip = host_data.substr(0, m_idx);  // 从查询结果中提取IP地址
-        std::cout << "ip: " << m_ip << std::endl;
-        m_port = atoi(host_data.substr(m_idx + 1, host_data.size() - m_idx).c_str());  // 从查询结果中提取端口号
-        std::cout << "port: " << m_port << std::endl;
-
-        // 尝试连接服务器
-        auto rt = newConnect(m_ip.c_str(), m_port);
-        if (!rt) {
-            LOG(ERROR) << "connect server error";  // 连接失败，记录错误日志
-            return;
-        } else {
-            LOG(INFO) << "connect server success";  // 连接成功，记录日志
-        }
-    }  // endif
-
-     // 2. 序列化请求参数
+    // 1. 序列化请求参数
     std::string args_str;
     {
         ScopedTimer ser(KrpcStat::SERIALIZE_REQ);
@@ -79,7 +57,7 @@ void KrpcChannel::CallMethod(const ::google::protobuf::MethodDescriptor *method,
         }
     }
 
-    // 3. 构建协议头
+    // 2. 构建协议头
     Krpc::RpcHeader krpcheader;
     krpcheader.set_service_name(service_name);
     krpcheader.set_method_name(method_name);
@@ -91,66 +69,111 @@ void KrpcChannel::CallMethod(const ::google::protobuf::MethodDescriptor *method,
         return;
     }
 
-    // 4. 打包数据发送
-    // 格式：[4B Total Len] + [4B Header Len] + [Header] + [Args]
-    
+    // 3. 打包数据发送
     uint32_t header_size = rpc_header_str.size();
-    uint32_t total_len = 4 + header_size + args_str.size(); // Total Len 包含 HeaderLen(4) + Header + Body
+    uint32_t total_len = 4 + header_size + args_str.size(); 
     
-    // 转网络字节序
     uint32_t net_total_len = htonl(total_len);
     uint32_t net_header_len = htonl(header_size);
 
     std::string send_rpc_str;
     send_rpc_str.reserve(4 + 4 + header_size + args_str.size());
-    
     send_rpc_str.append((char*)&net_total_len, 4);
     send_rpc_str.append((char*)&net_header_len, 4);
     send_rpc_str.append(rpc_header_str);
     send_rpc_str.append(args_str);
 
-    // 发送
-    {
-        ScopedTimer io(KrpcStat::NET_IO);
-        if (-1 == send(m_clientfd, send_rpc_str.c_str(), send_rpc_str.size(), 0)) {
-            close(m_clientfd);
-            m_clientfd = -1; // 重置
-            controller->SetFailed("send error");
-            return;
-        }
+    int retry_count = 3;
+    bool call_success = false;
 
-        // 5. 接收响应
-        // 格式：[4B Total Len] + [Response Data]
-        
-        // A. 先读4字节长度头
-        uint32_t response_len = 0;
-        if (recv_exact(m_clientfd, (char*)&response_len, 4) != 4) {
-            close(m_clientfd);
-            m_clientfd = -1;
-            controller->SetFailed("recv response length error");
-            return;
-        }
-        response_len = ntohl(response_len); // 转回主机字节序
+    while (retry_count > 0 && !call_success) {
+        if (-1 == m_clientfd) {  // 如果客户端socket未初始化
+            // 获取持久存活的全局 ZkClient
+            ZkClient* globalZkCli = RouteManager::GetInstance()->GetZkClient();
+            RouteNode hostNode;
+            {
+                ScopedTimer zk(KrpcStat::ZK_QUERY);
+                // 传入持久存活的 client
+                hostNode = QueryServiceHost(globalZkCli, service_name, method_name);
+            }
 
-        // B. 根据长度读取Body
-        std::vector<char> recv_buf(response_len);
-        if (recv_exact(m_clientfd, recv_buf.data(), response_len) != response_len) {
-            close(m_clientfd);
-            m_clientfd = -1;
-            controller->SetFailed("recv response body error");
-            return;
-        }
-        
-        // 6. 反序列化响应
-        {
-            ScopedTimer des(KrpcStat::DESERIALIZE_RES);
-            if (!response->ParseFromArray(recv_buf.data(), response_len)) {
-                close(m_clientfd);
+            if (!hostNode.isAlive()) {
+                LOG(ERROR) << "no alive host node, retry...";
+                retry_count--;
+                continue;
+            }
+
+            m_ip = hostNode.FetchIPAddress();
+            m_port = atoi(hostNode.FetchPort().c_str());
+            zk_path = "/" + service_name + "/" + method_name;
+            address = hostNode.FetchAddress();
+
+            // 尝试连接服务器
+            auto rt = newConnect(m_ip.c_str(), m_port);
+            if (!rt) {
+                RouteManager::GetInstance()->MarkNodeStatus(zk_path, address, Error);
+                LOG(ERROR) << "connect server error, retry...";
                 m_clientfd = -1;
-                controller->SetFailed("parse response error");
-                return;
+                retry_count--;
+                continue;
+            } else {
+                LOG(INFO) << "connect server success";
             }
         }
+
+        // 发送
+        {
+            ScopedTimer io(KrpcStat::NET_IO);
+            if (-1 == send(m_clientfd, send_rpc_str.c_str(), send_rpc_str.size(), 0)) {
+                close(m_clientfd);
+                m_clientfd = -1; // 重置
+                RouteManager::GetInstance()->MarkNodeStatus(zk_path, address, Error);
+                LOG(ERROR) << "send error, retry...";
+                retry_count--;
+                continue;
+            }
+
+            // A. 先读4字节长度头
+            uint32_t response_len = 0;
+            if (recv_exact(m_clientfd, (char*)&response_len, 4) != 4) {
+                close(m_clientfd);
+                m_clientfd = -1;
+                RouteManager::GetInstance()->MarkNodeStatus(zk_path, address, Error);
+                LOG(ERROR) << "recv response length error, retry...";
+                retry_count--;
+                continue;
+            }
+            response_len = ntohl(response_len); // 转回主机字节序
+
+            // B. 根据长度读取Body
+            std::vector<char> recv_buf(response_len);
+            if (recv_exact(m_clientfd, recv_buf.data(), response_len) != response_len) {
+                close(m_clientfd);
+                m_clientfd = -1;
+                RouteManager::GetInstance()->MarkNodeStatus(zk_path, address, Error);
+                LOG(ERROR) << "recv response body error, retry...";
+                retry_count--;
+                continue;
+            }
+            
+            // 6. 反序列化响应
+            {
+                ScopedTimer des(KrpcStat::DESERIALIZE_RES);
+                if (!response->ParseFromArray(recv_buf.data(), response_len)) {
+                    close(m_clientfd);
+                    m_clientfd = -1;
+                    controller->SetFailed("parse response error");
+                    return;
+                }
+            }
+        }
+
+        // 调用成功
+        call_success = true;
+    }
+
+    if (!call_success && !controller->Failed()) {
+        controller->SetFailed("RPC call failed after multiple retries");
     }
 }
 
@@ -185,50 +208,40 @@ bool KrpcChannel::newConnect(const char *ip, uint16_t port) {
 }
 
 // 从ZooKeeper查询服务地址
-std::string KrpcChannel::QueryServiceHost(ZkClient *zkclient, std::string service_name, std::string method_name, int &idx) {
+RouteNode KrpcChannel::QueryServiceHost(ZkClient *zkclient, std::string service_name, std::string method_name) {
     std::string method_path = "/" + service_name + "/" + method_name;  // 构造ZooKeeper路径
     std::cout << "method_path: " << method_path << std::endl;
 
     std::unique_lock<std::mutex> lock(g_data_mutx);  // 加锁，保证线程安全
     
     // 我们需要先触发一次对 ZK 的查询来更新本地路由表，或者发现本地没有时强制去ZK拉取
-    std::vector<std::string> routeNodes = RouteManager::GetInstance()->GetRouteNodes(method_path);
+    std::vector<RouteNode> routeNodes = RouteManager::GetInstance()->GetHealthNodes(method_path);
     if (routeNodes.empty()) {
         // 如果本地路由表没有缓存，尝试同步去ZK拉取一次并注册Watch
         RouteManager::GetInstance()->UpdateRouteTable(method_path, zkclient, true);
-        routeNodes = RouteManager::GetInstance()->GetRouteNodes(method_path);
+        routeNodes = RouteManager::GetInstance()->GetHealthNodes(method_path);
     }
+    if (routeNodes.empty()) return {};
     
-    // 通过配置选取负载均衡策略
-    std::string lb_type = KrpcApplication::GetConfig().Load("loadbalancer");
-    std::unique_ptr<LoadBalancer> loadBalancer;
-    
-    if (lb_type == "roundrobin") {
-        loadBalancer = std::make_unique<RoundRobinLoadBalancer>();
-    } else {
-        // 默认使用随机负载均衡
-        loadBalancer = std::make_unique<RandomLoadBalancer>();
-    }
-    
-    std::string host_data_1 = loadBalancer->Select(routeNodes);
+    // 获取全局单例负载均衡器并选择节点
+    RouteNode hostNode = RouteManager::GetInstance()->GetLoadBalancer()->Select(routeNodes);
     lock.unlock();  // 解锁
 
-    if (host_data_1 == "") {  // 如果未找到服务地址
+    if (hostNode.FetchAddress() == "") {  // 如果未找到服务地址
         LOG(ERROR) << method_path + " is not exist!";  // 记录错误日志
-        return " ";
+        return {};
     }
 
-    idx = host_data_1.find(":");  // 查找IP和端口的分隔符
-    if (idx == -1) {  // 如果分隔符不存在
+    if (!hostNode.isAddressDivisible()) {  // 如果分隔符不存在
         LOG(ERROR) << method_path + " address is invalid!";  // 记录错误日志
-        return " ";
+        return {};
     }
 
-    return host_data_1;  // 返回服务地址
+    return hostNode;  // 返回服务地址
 }
 
 // 构造函数，支持延迟连接
-KrpcChannel::KrpcChannel(bool connectNow) : m_clientfd(-1), m_idx(0) {
+KrpcChannel::KrpcChannel(bool connectNow) : m_clientfd(-1) {
     if (!connectNow) {  // 如果不需要立即连接
         return;
     }

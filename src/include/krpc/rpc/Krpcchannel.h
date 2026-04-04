@@ -26,9 +26,8 @@ private:
     std::string m_ip;
     uint16_t m_port;
     std::string method_name;
-    int m_idx; // 用来划分服务器ip和port的下标
     bool newConnect(const char *ip, uint16_t port);
-    std::string QueryServiceHost(ZkClient *zkclient, std::string service_name, std::string method_name, int &idx);
+    RouteNode QueryServiceHost(ZkClient *zkclient, std::string service_name, std::string method_name);
        // 新增：确保读取指定长度的数据，解决TCP拆包
     ssize_t recv_exact(int fd, char* buf, size_t size);
 };

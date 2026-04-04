@@ -106,18 +106,18 @@ std::string ZkClient::GetData(const char *path) {
     return "";  // 默认返回空字符串
 }
 
-std::vector<std::string> ZkClient::GetChildren(const char* path, bool watch) {
+std::vector<RouteNode> ZkClient::GetChildren(const char* path, bool watch) {
     String_vector children;
     int flag = zoo_get_children(m_zhandle, path, watch, &children);
     if (flag != ZOK) {
         LOG(ERROR) << "zoo_get_children for path [" << path << "] error!";
         return {};
     }
-    std::vector<std::string> routeNodes;
+    std::vector<RouteNode> routeNodes;
     if (children.count > 0) {
         routeNodes.reserve(children.count);
         for (int i = 0; i < children.count; ++i) {
-            routeNodes.emplace_back(children.data[i]);
+            routeNodes.emplace_back(children.data[i], Normal);
         }
     }
     deallocate_String_vector(&children);
