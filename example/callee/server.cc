@@ -23,6 +23,13 @@ class UserService : public Kuser::UserServiceRpc {
   1. 调用者（caller）通过 RPC 框架发送 Login 请求。
   2. 服务提供者（callee）接收到请求后，调用下面重写的 Login 方法。
   */
+  // 本地注册方法
+  bool Register(uint32_t id, std::string name, std::string pwd) {
+    std::cout << "doing local service: Register" << std::endl;
+    std::cout << "id:" << id << " name:" << name << " pwd:" << pwd << std::endl;
+    return true;
+  }
+
   void Login(::google::protobuf::RpcController* controller,
              const ::Kuser::LoginRequest* request,
              ::Kuser::LoginResponse* response,
@@ -36,6 +43,24 @@ class UserService : public Kuser::UserServiceRpc {
     code->set_errcode(0);
     code->set_errmsg("");
     response->set_success(login_result);
+
+    done->Run();
+  }
+
+  void Register(::google::protobuf::RpcController* controller,
+                const ::Kuser::RegisterRequest* request,
+                ::Kuser::RegisterResponse* response,
+                ::google::protobuf::Closure* done) {
+    uint32_t id = request->id();
+    std::string name = request->name();
+    std::string pwd = request->pwd();
+
+    bool register_result = Register(id, name, pwd);
+
+    Kuser::ResultCode* code = response->mutable_result();
+    code->set_errcode(0);
+    code->set_errmsg("");
+    response->set_success(register_result);
 
     done->Run();
   }
