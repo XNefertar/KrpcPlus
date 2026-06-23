@@ -1,36 +1,32 @@
-#ifndef _KrpcRouteManager_H__
-#define _KrpcRouteManager_H__
-#include <mutex>
+#ifndef KRPC_REGISTRY_ROUTE_MANAGER_H_
+#define KRPC_REGISTRY_ROUTE_MANAGER_H_
+
 #include <memory>
+#include <mutex>
 #include <string>
-#include <vector>
 #include <unordered_map>
-#include "zookeeperutil.h"
+#include <vector>
 
+// 前向声明
+class ZookeeperClient;
+
+// 本地路由表管理器（单例模式）
+// 使用 RCU（Read-Copy-Update）模式实现无锁读取
 class RouteManager {
-    using RouteTable = std::unordered_map<std::string, std::vector<std::string>>;
+  using RouteTable =
+      std::unordered_map<std::string, std::vector<std::string>>;
 
-private:
-    RouteManager() : _curRouteTable(std::make_shared<RouteTable>()) {}
-    std::shared_ptr<const RouteTable> _curRouteTable;;
-    ZkClient *_zkClient;
-    std::mutex _writeMutex;
+ private:
+  RouteManager() : _curRouteTable(std::make_shared<RouteTable>()) {}
+  std::shared_ptr<const RouteTable> _curRouteTable;
+  ZookeeperClient* _zkClient;
+  std::mutex _writeMutex;
 
-    std::vector<std::string> convertToStringVector(const String_vector& children) {
-        std::vector<std::string> routesSet;
-        if (children.count > 0) {
-            routesSet.reserve(children.count);
-        }
-        for (int i = 0; i < children.count; ++i) {
-            routesSet.push_back(std::string(children.data[i]));
-        }
-        return routesSet;
-    }
-
-public:
-    std::vector<std::string> GetRouteNodes(const std::string& path) const;
-    void UpdateRouteTable(const std::string& path, ZkClient* client, bool watch = false);
-    static RouteManager* GetInstance();
+ public:
+  std::vector<std::string> GetRouteNodes(const std::string& path) const;
+  void UpdateRouteTable(const std::string& path, ZookeeperClient* client,
+                        bool watch = false);
+  static RouteManager* GetInstance();
 };
 
-#endif
+#endif  // KRPC_REGISTRY_ROUTE_MANAGER_H_
