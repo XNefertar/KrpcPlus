@@ -48,6 +48,10 @@ Makefile
 build/
 
 # binary files
+
+# protobuf generated code (regenerate from .proto)
+*.pb.h
+*.pb.cc
 bin/
 
 # vscode files
