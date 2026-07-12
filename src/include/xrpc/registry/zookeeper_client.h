@@ -1,5 +1,5 @@
-#ifndef KRPC_REGISTRY_ZOOKEEPER_CLIENT_H_
-#define KRPC_REGISTRY_ZOOKEEPER_CLIENT_H_
+#ifndef XRPC_REGISTRY_ZOOKEEPER_CLIENT_H_
+#define XRPC_REGISTRY_ZOOKEEPER_CLIENT_H_
 
 #include <zookeeper/zookeeper.h>
 
@@ -35,4 +35,4 @@ class ZookeeperClient {
   zhandle_t* m_zhandle;
 };
 
-#endif  // KRPC_REGISTRY_ZOOKEEPER_CLIENT_H_
+#endif  // XRPC_REGISTRY_ZOOKEEPER_CLIENT_H_

@@ -4,11 +4,11 @@
 #include <thread>
 
 #include "../user.pb.h"
-#include "krpc/common/application.h"
-#include "krpc/common/logger.h"
-#include "krpc/monitor/runtime_stats.h"
-#include "krpc/rpc/channel.h"
-#include "krpc/rpc/controller.h"
+#include "xrpc/common/application.h"
+#include "xrpc/common/logger.h"
+#include "xrpc/monitor/runtime_stats.h"
+#include "xrpc/rpc/channel.h"
+#include "xrpc/rpc/controller.h"
 
 // 发送 RPC 请求的函数，模拟客户端调用远程服务
 void send_request(int thread_id, std::atomic<int>& success_count,

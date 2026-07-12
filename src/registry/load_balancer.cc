@@ -1,4 +1,4 @@
-#include "krpc/registry/load_balancer.h"
+#include "xrpc/registry/load_balancer.h"
 
 std::string RoundRobinLoadBalancer::Select(
     const std::vector<std::string>& nodes) {

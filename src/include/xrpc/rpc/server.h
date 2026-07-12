@@ -1,5 +1,5 @@
-#ifndef KRPC_RPC_SERVER_H_
-#define KRPC_RPC_SERVER_H_
+#ifndef XRPC_RPC_SERVER_H_
+#define XRPC_RPC_SERVER_H_
 
 #include <google/protobuf/descriptor.h>
 #include <google/protobuf/service.h>
@@ -44,4 +44,4 @@ class RpcServer {
                        google::protobuf::Message* response);
 };
 
-#endif  // KRPC_RPC_SERVER_H_
+#endif  // XRPC_RPC_SERVER_H_

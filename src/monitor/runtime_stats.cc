@@ -1,4 +1,4 @@
-#include "krpc/monitor/runtime_stats.h"
+#include "xrpc/monitor/runtime_stats.h"
 
 RuntimeStats& RuntimeStats::GetInstance() {
   static RuntimeStats instance;

@@ -1,4 +1,4 @@
-#include "krpc/rpc/channel.h"
+#include "xrpc/rpc/channel.h"
 
 #include <errno.h>
 #include <sys/socket.h>
@@ -8,13 +8,13 @@
 
 #include <memory>
 
-#include "krpc/common/application.h"
-#include "krpc/common/logger.h"
-#include "krpc/monitor/runtime_stats.h"
-#include "krpc/registry/load_balancer.h"
-#include "krpc/registry/route_manager.h"
-#include "krpc/registry/zookeeper_client.h"
-#include "krpc/protocol/rpc_header.pb.h"
+#include "xrpc/common/application.h"
+#include "xrpc/common/logger.h"
+#include "xrpc/monitor/runtime_stats.h"
+#include "xrpc/registry/load_balancer.h"
+#include "xrpc/registry/route_manager.h"
+#include "xrpc/registry/zookeeper_client.h"
+#include "xrpc/protocol/rpc_header.pb.h"
 
 std::mutex g_data_mutx;  // 全局互斥锁，用于保护共享数据的线程安全
 
@@ -82,7 +82,7 @@ void RpcChannel::CallMethod(
   }
 
   // 3. 构建协议头
-  krpc::RpcHeader rpc_header;
+  xrpc::RpcHeader rpc_header;
   rpc_header.set_service_name(service_name);
   rpc_header.set_method_name(method_name);
   rpc_header.set_args_size(args_str.size());

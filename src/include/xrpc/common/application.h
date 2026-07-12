@@ -1,7 +1,7 @@
-#ifndef KRPC_COMMON_APPLICATION_H_
-#define KRPC_COMMON_APPLICATION_H_
+#ifndef XRPC_COMMON_APPLICATION_H_
+#define XRPC_COMMON_APPLICATION_H_
 
-#include "krpc/common/config.h"
+#include "xrpc/common/config.h"
 
 #include <mutex>
 
@@ -20,4 +20,4 @@ class Application {
   Application(Application&&) = delete;
 };
 
-#endif  // KRPC_COMMON_APPLICATION_H_
+#endif  // XRPC_COMMON_APPLICATION_H_

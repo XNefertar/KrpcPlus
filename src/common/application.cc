@@ -1,4 +1,4 @@
-#include "krpc/common/application.h"
+#include "xrpc/common/application.h"
 
 #include <cstdlib>
 #include <iostream>

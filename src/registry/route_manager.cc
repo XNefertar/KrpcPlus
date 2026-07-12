@@ -1,7 +1,7 @@
 #include <atomic>
-#include "krpc/registry/route_manager.h"
-#include "krpc/registry/zookeeper_client.h"
-#include "krpc/common/logger.h"
+#include "xrpc/registry/route_manager.h"
+#include "xrpc/registry/zookeeper_client.h"
+#include "xrpc/common/logger.h"
 
 std::vector<std::string> RouteManager::GetRouteNodes(
     const std::string& path) const {

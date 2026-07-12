@@ -1,5 +1,5 @@
-#ifndef KRPC_REGISTRY_ROUTE_MANAGER_H_
-#define KRPC_REGISTRY_ROUTE_MANAGER_H_
+#ifndef XRPC_REGISTRY_ROUTE_MANAGER_H_
+#define XRPC_REGISTRY_ROUTE_MANAGER_H_
 
 #include <memory>
 #include <mutex>
@@ -29,4 +29,4 @@ class RouteManager {
   static RouteManager* GetInstance();
 };
 
-#endif  // KRPC_REGISTRY_ROUTE_MANAGER_H_
+#endif  // XRPC_REGISTRY_ROUTE_MANAGER_H_

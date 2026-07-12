@@ -1,5 +1,5 @@
-#ifndef KRPC_REGISTRY_LOAD_BALANCER_H_
-#define KRPC_REGISTRY_LOAD_BALANCER_H_
+#ifndef XRPC_REGISTRY_LOAD_BALANCER_H_
+#define XRPC_REGISTRY_LOAD_BALANCER_H_
 
 #include <atomic>
 #include <random>
@@ -28,4 +28,4 @@ class RandomLoadBalancer : public LoadBalancer {
   std::string Select(const std::vector<std::string>& nodes) override;
 };
 
-#endif  // KRPC_REGISTRY_LOAD_BALANCER_H_
+#endif  // XRPC_REGISTRY_LOAD_BALANCER_H_

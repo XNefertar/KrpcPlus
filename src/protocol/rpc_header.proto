@@ -1,5 +1,5 @@
 syntax = "proto3";
-package krpc;
+package xrpc;
 
 message RpcHeader {
   bytes service_name = 1;

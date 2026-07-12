@@ -7,7 +7,7 @@
 #include <numeric>
 #include <vector>
 
-#include "krpc/common/logger.h"
+#include "xrpc/common/logger.h"
 
 // 运行时性能统计类（单例模式），记录 RPC 调用各阶段的耗时
 class RuntimeStats {

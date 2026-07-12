@@ -1,5 +1,5 @@
-#ifndef KRPC_RPC_CHANNEL_H_
-#define KRPC_RPC_CHANNEL_H_
+#ifndef XRPC_RPC_CHANNEL_H_
+#define XRPC_RPC_CHANNEL_H_
 
 #include <unistd.h>
 #include <google/protobuf/service.h>
@@ -43,4 +43,4 @@ class RpcChannel : public google::protobuf::RpcChannel {
   ssize_t recv_exact(int fd, char* buf, size_t size);
 };
 
-#endif  // KRPC_RPC_CHANNEL_H_
+#endif  // XRPC_RPC_CHANNEL_H_

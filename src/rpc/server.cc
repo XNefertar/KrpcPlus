@@ -1,11 +1,11 @@
-#include "krpc/rpc/server.h"
+#include "xrpc/rpc/server.h"
 
 #include <iostream>
 
-#include "krpc/common/application.h"
-#include "krpc/common/logger.h"
-#include "krpc/protocol/rpc_header.pb.h"
-#include "krpc/registry/zookeeper_client.h"
+#include "xrpc/common/application.h"
+#include "xrpc/common/logger.h"
+#include "xrpc/protocol/rpc_header.pb.h"
+#include "xrpc/registry/zookeeper_client.h"
 
 // 注册服务对象及其方法，以便服务端能够处理客户端的 RPC 请求
 void RpcServer::NotifyService(google::protobuf::Service* service) {
@@ -127,7 +127,7 @@ void RpcServer::OnMessage(const muduo::net::TcpConnectionPtr& conn,
 
     // 读取 Header 数据
     std::string rpc_header_str(buffer->peek(), header_len);
-    krpc::RpcHeader krpcHeader;
+    xrpc::RpcHeader xrpcHeader;
     buffer->retrieve(header_len);
 
     // 读取 Body 数据 (args)
@@ -137,13 +137,13 @@ void RpcServer::OnMessage(const muduo::net::TcpConnectionPtr& conn,
     buffer->retrieve(args_size);
 
     // 4. 业务逻辑处理
-    if (!krpcHeader.ParseFromString(rpc_header_str)) {
+    if (!xrpcHeader.ParseFromString(rpc_header_str)) {
       std::cout << "header parse error" << std::endl;
       return;
     }
 
-    std::string service_name = krpcHeader.service_name();
-    std::string method_name = krpcHeader.method_name();
+    std::string service_name = xrpcHeader.service_name();
+    std::string method_name = xrpcHeader.method_name();
 
     auto it = service_map.find(service_name);
     if (it == service_map.end()) {
