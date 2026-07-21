@@ -2,10 +2,10 @@
 #include <vector>
 #include <condition_variable>
 
-#include "krpc/registry/zookeeper_client.h"
-#include "krpc/common/application.h"
-#include "krpc/common/logger.h"
-#include "krpc/registry/route_manager.h"
+#include "xrpc/registry/zookeeper_client.h"
+#include "xrpc/common/application.h"
+#include "xrpc/common/logger.h"
+#include "xrpc/registry/route_manager.h"
 
 // 全局的 watcher 观察器，用于接收 ZooKeeper 服务器的通知
 void global_watcher(zhandle_t* zh, int type, int status, const char* path,

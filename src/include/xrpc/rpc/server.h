@@ -1,5 +1,5 @@
-#ifndef KRPC_RPC_SERVER_H_
-#define KRPC_RPC_SERVER_H_
+#ifndef XRPC_RPC_SERVER_H_
+#define XRPC_RPC_SERVER_H_
 
 #include <google/protobuf/descriptor.h>
 #include <google/protobuf/service.h>
@@ -9,8 +9,11 @@
 #include <muduo/net/TcpServer.h>
 
 #include <functional>
+#include <memory>
 #include <string>
 #include <unordered_map>
+
+#include "xrpc/codec/codec.h"
 
 // 前向声明
 class ZookeeperClient;
@@ -37,6 +40,9 @@ class RpcServer {
   // 保存已注册的服务对象和 RPC 方法
   std::unordered_map<std::string, ServiceInfo> service_map;
 
+  // Codec 层：自动检测协议版本并解码/编码
+  std::unique_ptr<ServerCodec> _serverCodec;
+
   void OnConnection(const muduo::net::TcpConnectionPtr& conn);
   void OnMessage(const muduo::net::TcpConnectionPtr& conn,
                  muduo::net::Buffer* buffer, muduo::Timestamp receive_time);
@@ -44,4 +50,4 @@ class RpcServer {
                        google::protobuf::Message* response);
 };
 
-#endif  // KRPC_RPC_SERVER_H_
+#endif  // XRPC_RPC_SERVER_H_

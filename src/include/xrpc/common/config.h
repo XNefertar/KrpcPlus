@@ -1,5 +1,5 @@
-#ifndef KRPC_COMMON_CONFIG_H_
-#define KRPC_COMMON_CONFIG_H_
+#ifndef XRPC_COMMON_CONFIG_H_
+#define XRPC_COMMON_CONFIG_H_
 
 #include <string>
 #include <unordered_map>
@@ -19,4 +19,4 @@ class Config {
   void Trim(std::string& read_buf);
 };
 
-#endif  // KRPC_COMMON_CONFIG_H_
+#endif  // XRPC_COMMON_CONFIG_H_

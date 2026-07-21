@@ -1,0 +1,33 @@
+syntax = "proto3";
+package xrpc;
+
+// === 固定头 (16 字节，二进制) ===
+// ┌──────────┬──────────┬──────────┬──────────┬──────────┬──────────┐
+// │  Magic   │  Type    │ Stream   │  Total   │  Header  │  Stream  │
+// │  0xKR    │  (1B)    │  Type(1B)│  Size(4B)│  Size(2B)│  ID(4B)  │
+// │  (2B)    │          │          │          │          │          │
+// └──────────┴──────────┴──────────┴──────────┴──────────┴──────────┘
+
+
+// === 可变头 (Protobuf 序列化) ===
+message RequestProtocol {
+  uint64 request_id              = 1;   // 请求ID（用于异步匹配请求-响应）
+  uint32 timeout                 = 2;   // 超时时间 (ms)
+  string caller                  = 3;   // 主调服务名
+  string callee                  = 4;   // 被调服务名
+  string func_name               = 5;   // 方法名（如 /UserService/Login）
+  int32  content_type            = 6;   // 序列化类型: 0=Protobuf, 1=JSON, 2=FlatBuffers
+  int32  content_encoding        = 7;   // 压缩类型: 0=None, 1=Gzip, 2=Snappy, 3=LZ4
+  map<string, string> trans_info = 8;   // 透传信息（链路追踪、染色等）
+  string caller_app              = 9;   // 主调应用名（可选）
+  int32  message_type            = 10;  // 消息类型: 0=请求, 1=响应, 2=单向
+}
+
+message ResponseProtocol {
+  uint64 request_id              = 1;   // 对应请求的 request_id
+  int32  ret_code                = 2;   // 框架层返回码 (0=成功)
+  string error_msg               = 3;   // 错误描述
+  int32  content_type            = 4;   // 序列化类型
+  int32  content_encoding        = 5;   // 压缩类型
+  map<string, string> trans_info = 6;
+}

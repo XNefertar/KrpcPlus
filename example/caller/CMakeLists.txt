@@ -8,7 +8,7 @@ file(GLOB PROTO_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/../*.pb.cc)
 add_executable(client ${Client_SRCS} ${PROTO_SRCS})
 
 #链接必要的库，尤其是example中生成的静态库
-target_link_libraries(client krpc_core ${LIBS})
+target_link_libraries(client xrpc_core ${LIBS})
 
 # 设置编译选项
 target_compile_options(client PRIVATE -std=c++11 -Wall)

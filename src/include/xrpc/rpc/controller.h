@@ -1,5 +1,5 @@
-#ifndef KRPC_RPC_CONTROLLER_H_
-#define KRPC_RPC_CONTROLLER_H_
+#ifndef XRPC_RPC_CONTROLLER_H_
+#define XRPC_RPC_CONTROLLER_H_
 
 #include <google/protobuf/service.h>
 
@@ -24,4 +24,4 @@ class Controller : public google::protobuf::RpcController {
   std::string m_errText; // RPC 方法执行过程中的错误信息
 };
 
-#endif  // KRPC_RPC_CONTROLLER_H_
+#endif  // XRPC_RPC_CONTROLLER_H_

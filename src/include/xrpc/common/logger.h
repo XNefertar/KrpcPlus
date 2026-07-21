@@ -1,5 +1,5 @@
-#ifndef KRPC_COMMON_LOGGER_H_
-#define KRPC_COMMON_LOGGER_H_
+#ifndef XRPC_COMMON_LOGGER_H_
+#define XRPC_COMMON_LOGGER_H_
 
 #include <glog/logging.h>
 
@@ -30,4 +30,4 @@ class Logger {
   Logger& operator=(const Logger&) = delete;
 };
 
-#endif  // KRPC_COMMON_LOGGER_H_
+#endif  // XRPC_COMMON_LOGGER_H_

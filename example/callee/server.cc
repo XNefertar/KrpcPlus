@@ -2,8 +2,8 @@
 #include <string>
 
 #include "../user.pb.h"
-#include "krpc/common/application.h"
-#include "krpc/rpc/server.h"
+#include "xrpc/common/application.h"
+#include "xrpc/rpc/server.h"
 
 /*
 UserService 原本是一个本地服务，提供了两个本地方法：Login 和 GetFriendLists。
