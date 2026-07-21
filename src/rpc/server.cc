@@ -2,10 +2,21 @@
 
 #include <iostream>
 
+#include "xrpc/codec/codec_factory.h"
+#include "xrpc/codec/noncontiguous_buffer.h"
+#include "xrpc/codec/protocol_message.h"
+#include "xrpc/codec/xrpc_codec.h"
 #include "xrpc/common/application.h"
 #include "xrpc/common/logger.h"
-#include "xrpc/protocol/rpc_header.pb.h"
 #include "xrpc/registry/zookeeper_client.h"
+
+// Muduo TcpConnection 到 Codec Connection 的适配器
+// Codec 层不需要访问 Muduo 细节，只把指针原样透传
+struct MuduoConnection : public Connection {
+  muduo::net::TcpConnectionPtr muduo_conn;
+  explicit MuduoConnection(muduo::net::TcpConnectionPtr c)
+      : muduo_conn(std::move(c)) {}
+};
 
 // 注册服务对象及其方法，以便服务端能够处理客户端的 RPC 请求
 void RpcServer::NotifyService(google::protobuf::Service* service) {
@@ -96,106 +107,118 @@ void RpcServer::OnConnection(const muduo::net::TcpConnectionPtr& conn) {
 }
 
 // 消息回调函数，处理客户端发送的 RPC 请求
+// 使用 Codec 层统一处理 Legacy / XRpc 两种协议
 void RpcServer::OnMessage(const muduo::net::TcpConnectionPtr& conn,
                            muduo::net::Buffer* buffer,
                            muduo::Timestamp receive_time) {
-  std::cout << "OnMessage" << std::endl;
+  // ---- 步骤 1: 首次收到消息时，自动检测协议并创建 Codec ----
+  if (!_serverCodec) {
+    NoncontiguousBuffer probe(buffer->peek(), buffer->readableBytes());
+    _serverCodec = CodecFactory::CreateServerCodec(probe);
+    LOG(INFO) << "ServerCodec created (auto-detected protocol)";
+  }
 
-  // 循环处理缓冲区，解决粘包问题
-  while (buffer->readableBytes() >= 4) {
-    // 1. 预读取前 4 个字节（Total Length）
-    uint32_t total_len = 0;
-    std::memcpy(&total_len, buffer->peek(), 4);
-    total_len = ntohl(total_len);
+  // ---- 步骤 2: 连接适配器 ----
+  auto conn_adapter = std::make_shared<MuduoConnection>(conn);
 
-    // 2. 检查数据是否完整（拆包处理）
-    if (buffer->readableBytes() < 4 + total_len) {
-      break;
+  // ---- 步骤 3: 循环处理粘包 ----
+  while (buffer->readableBytes() > 0) {
+    NoncontiguousBuffer nbuf(buffer->peek(), buffer->readableBytes());
+
+    // 3a. 检查是否有完整帧
+    std::any metadata;
+    int frame_size = _serverCodec->CheckAndPick(conn_adapter, nbuf, metadata);
+
+    if (frame_size == 0) {
+      break;  // 半包，等待更多数据
     }
-
-    // --- 数据包完整，开始解包 ---
-
-    // 3. 真正读取数据
-    buffer->retrieve(4);  // 消耗掉长度头
-
-    // 读取 Header Length
-    uint32_t header_len = 0;
-    const char* data_ptr = buffer->peek();
-    std::memcpy(&header_len, data_ptr, 4);
-    header_len = ntohl(header_len);
-    buffer->retrieve(4);  // 消耗掉 header length
-
-    // 读取 Header 数据
-    std::string rpc_header_str(buffer->peek(), header_len);
-    xrpc::RpcHeader xrpcHeader;
-    buffer->retrieve(header_len);
-
-    // 读取 Body 数据 (args)
-    uint32_t args_size =
-        total_len - 4 - header_len;  // 总长度 - header长度字段(4) - header内容
-    std::string args_str(buffer->peek(), args_size);
-    buffer->retrieve(args_size);
-
-    // 4. 业务逻辑处理
-    if (!xrpcHeader.ParseFromString(rpc_header_str)) {
-      std::cout << "header parse error" << std::endl;
+    if (frame_size < 0) {
+      LOG(ERROR) << "Invalid frame detected, code=" << frame_size
+                 << ", closing connection";
+      conn->shutdown();
       return;
     }
 
-    std::string service_name = xrpcHeader.service_name();
-    std::string method_name = xrpcHeader.method_name();
+    // 3b. 解码完整帧 → ProtocolMessage
+    ProtocolMessage msg;
+    int decode_ret = _serverCodec->ZeroCopyDecode(conn_adapter, nbuf, msg);
+    if (decode_ret != kCodecOk) {
+      LOG(ERROR) << "Decode failed: " << decode_ret;
+      conn->shutdown();
+      return;
+    }
+
+    // 3c. 同步 Muduo Buffer（消耗已处理的字节）
+    buffer->retrieve(frame_size);
+
+    // ---- 步骤 4: 业务分发（与原逻辑一致） ----
+    const std::string& service_name = msg.service_name;
+    const std::string& method_name  = msg.method_name;
 
     auto it = service_map.find(service_name);
     if (it == service_map.end()) {
       std::cout << service_name << " is not exist!" << std::endl;
-      return;
+      continue;  // 不认识的 service，跳过这个包继续处理下一个
     }
     auto mit = it->second.method_map.find(method_name);
     if (mit == it->second.method_map.end()) {
       std::cout << service_name << "." << method_name << " is not exist!"
                 << std::endl;
-      return;
+      continue;
     }
 
     google::protobuf::Service* service = it->second.service;
     const google::protobuf::MethodDescriptor* method = mit->second;
 
+    // 4a. 反序列化请求体
     google::protobuf::Message* request =
         service->GetRequestPrototype(method).New();
-    if (!request->ParseFromString(args_str)) {
+    if (!request->ParseFromString(msg.body)) {
       std::cout << "request parse error" << std::endl;
-      return;
+      delete request;
+      continue;
     }
+
+    // 4b. 新建响应对象
     google::protobuf::Message* response =
         service->GetResponsePrototype(method).New();
 
+    // 4c. 异步回调：业务执行完毕后调用 SendRpcResponse 编码并发送
     google::protobuf::Closure* done = google::protobuf::NewCallback<
         RpcServer, const muduo::net::TcpConnectionPtr&,
         google::protobuf::Message*>(this, &RpcServer::SendRpcResponse, conn,
                                      response);
+
+    // 4d. 调用业务方法（同步执行在当前 IO 线程）
     service->CallMethod(method, nullptr, request, response, done);
   }
 }
 
-// 发送 RPC 响应给客户端
+// 发送 RPC 响应给客户端（使用 Codec 层编码）
 void RpcServer::SendRpcResponse(const muduo::net::TcpConnectionPtr& conn,
                                  google::protobuf::Message* response) {
   std::string response_str;
-  if (response->SerializeToString(&response_str)) {
-    // 构造响应：[4 bytes Total Len] + [Response Data]
-    uint32_t len = response_str.size();
-    uint32_t net_len = htonl(len);
-
-    std::string send_buf;
-    send_buf.resize(4 + len);
-
-    std::memcpy(&send_buf[0], &net_len, 4);
-    std::memcpy(&send_buf[4], response_str.data(), len);
-
-    conn->send(send_buf);
-  } else {
+  if (!response->SerializeToString(&response_str)) {
     std::cout << "serialize response error!" << std::endl;
+    return;
   }
+
+  // 构建 ProtocolMessage
+  ProtocolMessage resp_msg;
+  resp_msg.body         = response_str;
+  resp_msg.message_type = MessageType::kResponse;
+
+  // 通过 Codec 编码
+  NoncontiguousBuffer out;
+  auto conn_adapter = std::make_shared<MuduoConnection>(conn);
+  int ret = _serverCodec->ZeroCopyEncode(conn_adapter, resp_msg, out);
+
+  if (ret != kCodecOk) {
+    std::cout << "encode response error: " << ret << std::endl;
+    return;
+  }
+
+  conn->send(out.ToString());
 }
 
 // 析构函数，退出事件循环

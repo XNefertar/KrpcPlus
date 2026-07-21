@@ -1,6 +1,7 @@
 add_definitions(-DTHREADED)
 
 # 搜集所有子目录下的源文件
+file(GLOB CODEC_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/codec/*.cc)
 file(GLOB COMMON_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/common/*.cc)
 file(GLOB MONITOR_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/monitor/*.cc)
 file(GLOB PROTOCOL_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/protocol/*.cc)
@@ -9,6 +10,7 @@ file(GLOB RPC_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/rpc/*.cc)
 
 # 将所有源文件合并到 SRC_FILES
 set(SRC_FILES
+    ${CODEC_SRCS}
     ${COMMON_SRCS}
     ${MONITOR_SRCS}
     ${PROTOCOL_SRCS}
@@ -22,12 +24,13 @@ file(GLOB PROTO_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/protocol/*.pb.cc)
 # 创建静态库
 add_library(xrpc_core STATIC ${SRC_FILES})
 
-# 链接 protobuf 库
+# 链接 protobuf 库 + zookeeper
 target_link_libraries(xrpc_core PUBLIC protobuf)
 
 # 设置头文件的路径
 target_include_directories(xrpc_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/xrpc/codec
     ${CMAKE_CURRENT_SOURCE_DIR}/include/xrpc/common
     ${CMAKE_CURRENT_SOURCE_DIR}/include/xrpc/monitor
     ${CMAKE_CURRENT_SOURCE_DIR}/include/xrpc/protocol

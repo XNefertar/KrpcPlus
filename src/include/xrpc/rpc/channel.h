@@ -4,16 +4,22 @@
 #include <unistd.h>
 #include <google/protobuf/service.h>
 
+#include <memory>
 #include <string>
+
+#include "xrpc/codec/codec.h"
 
 // 前向声明
 class ZookeeperClient;
 
 // 客户端 RPC 通道，继承自 google::protobuf::RpcChannel
 // 负责序列化请求、发送到服务端、接收并反序列化响应
+// 通过 _useXrpcProtocol 切换 Legacy / XRpc 协议
 class RpcChannel : public google::protobuf::RpcChannel {
  public:
-  explicit RpcChannel(bool connectNow);
+  // connectNow: 是否在构造时立即建立连接
+  // useXrpc:   true=XRpc新协议, false=Legacy老协议
+  explicit RpcChannel(bool connectNow, bool useXrpc = false);
   virtual ~RpcChannel() {
     if (m_clientfd >= 0) {
       close(m_clientfd);
@@ -33,6 +39,9 @@ class RpcChannel : public google::protobuf::RpcChannel {
   uint16_t m_port;
   std::string method_name;
   int m_idx;  // 用于划分服务器 ip 和 port 的下标
+
+  bool _useXrpcProtocol;
+  std::unique_ptr<ClientCodec> _clientCodec;
 
   bool newConnect(const char* ip, uint16_t port);
   std::string QueryServiceHost(ZookeeperClient* zkclient,

@@ -8,13 +8,16 @@
 
 #include <memory>
 
+#include "xrpc/codec/codec_factory.h"
+#include "xrpc/codec/noncontiguous_buffer.h"
+#include "xrpc/codec/protocol_message.h"
+#include "xrpc/codec/xrpc_codec.h"
 #include "xrpc/common/application.h"
 #include "xrpc/common/logger.h"
 #include "xrpc/monitor/runtime_stats.h"
 #include "xrpc/registry/load_balancer.h"
 #include "xrpc/registry/route_manager.h"
 #include "xrpc/registry/zookeeper_client.h"
-#include "xrpc/protocol/rpc_header.pb.h"
 
 std::mutex g_data_mutx;  // 全局互斥锁，用于保护共享数据的线程安全
 
@@ -33,7 +36,7 @@ ssize_t RpcChannel::recv_exact(int fd, char* buf, size_t size) {
   return total_read;
 }
 
-// RPC 调用的核心方法，负责将客户端请求序列化并发送到服务端，同时接收响应
+// RPC 调用的核心方法，通过 Codec 层统一处理 Legacy / XRpc 协议的编解码
 void RpcChannel::CallMethod(
     const ::google::protobuf::MethodDescriptor* method,
     ::google::protobuf::RpcController* controller,
@@ -41,13 +44,14 @@ void RpcChannel::CallMethod(
     ::google::protobuf::Message* response,
     ::google::protobuf::Closure* done) {
   ScopedTimer total(RuntimeStats::TOTAL);
-  if (-1 == m_clientfd) {  // 如果客户端 socket 未初始化
-    // 获取服务对象名和方法名
+
+  // ---- 步骤 1: 懒初始化连接 + 服务发现 ----
+  if (-1 == m_clientfd) {
     const google::protobuf::ServiceDescriptor* sd = method->service();
     service_name = sd->name();
     method_name = method->name();
 
-    // 客户端需要查询 ZooKeeper，找到提供该服务的服务器地址
+    // 从 ZooKeeper 查询服务地址
     ZookeeperClient zkCli;
     zkCli.Start();
     std::string host_data;
@@ -55,23 +59,20 @@ void RpcChannel::CallMethod(
       ScopedTimer zk(RuntimeStats::ZK_QUERY);
       host_data = QueryServiceHost(&zkCli, service_name, method_name, m_idx);
     }
-    m_ip = host_data.substr(0, m_idx);
-    std::cout << "ip: " << m_ip << std::endl;
-    m_port = atoi(
-        host_data.substr(m_idx + 1, host_data.size() - m_idx).c_str());
-    std::cout << "port: " << m_port << std::endl;
+    m_ip   = host_data.substr(0, m_idx);
+    m_port = atoi(host_data.substr(m_idx + 1, host_data.size() - m_idx).c_str());
+    std::cout << "ip: " << m_ip << ", port: " << m_port << std::endl;
 
-    // 尝试连接服务器
     auto rt = newConnect(m_ip.c_str(), m_port);
     if (!rt) {
       LOG(ERROR) << "connect server error";
+      controller->SetFailed("connect server error");
       return;
-    } else {
-      LOG(INFO) << "connect server success";
     }
+    LOG(INFO) << "connect server success";
   }
 
-  // 2. 序列化请求参数
+  // ---- 步骤 2: 序列化请求体 ----
   std::string args_str;
   {
     ScopedTimer ser(RuntimeStats::SERIALIZE_REQ);
@@ -81,76 +82,127 @@ void RpcChannel::CallMethod(
     }
   }
 
-  // 3. 构建协议头
-  xrpc::RpcHeader rpc_header;
-  rpc_header.set_service_name(service_name);
-  rpc_header.set_method_name(method_name);
-  rpc_header.set_args_size(args_str.size());
+  // ---- 步骤 3: 构建 ProtocolMessage → Codec 编码 ----
+  ProtocolMessage req_msg;
+  req_msg.version       = _useXrpcProtocol ? ProtocolVersion::kXRpc : ProtocolVersion::kLegacy;
+  req_msg.service_name  = service_name;
+  req_msg.method_name   = method_name;
+  req_msg.body          = args_str;
+  req_msg.content_type  = ContentType::kProtobuf;
+  req_msg.message_type  = MessageType::kRequest;
 
-  std::string rpc_header_str;
-  if (!rpc_header.SerializeToString(&rpc_header_str)) {
-    controller->SetFailed("serialize rpc header error!");
+  ClientContext ctx;
+  ctx.service_name = service_name;
+  ctx.method_name  = method_name;
+
+  NoncontiguousBuffer encoded;
+  int enc_ret = _clientCodec->ZeroCopyEncode(ctx, req_msg, encoded);
+  if (enc_ret != kCodecOk) {
+    controller->SetFailed("encode request error");
     return;
   }
+  std::string wire_data = encoded.ToString();
 
-  // 4. 打包数据发送
-  // 格式：[4B Total Len] + [4B Header Len] + [Header] + [Args]
-  uint32_t header_size = rpc_header_str.size();
-  uint32_t total_len = 4 + header_size + args_str.size();
-
-  // 转网络字节序
-  uint32_t net_total_len = htonl(total_len);
-  uint32_t net_header_len = htonl(header_size);
-
-  std::string send_rpc_str;
-  send_rpc_str.reserve(4 + 4 + header_size + args_str.size());
-
-  send_rpc_str.append((char*)&net_total_len, 4);
-  send_rpc_str.append((char*)&net_header_len, 4);
-  send_rpc_str.append(rpc_header_str);
-  send_rpc_str.append(args_str);
-
-  // 发送
+  // ---- 步骤 4: 发送 + 接收 ----
   {
     ScopedTimer io(RuntimeStats::NET_IO);
-    if (-1 == send(m_clientfd, send_rpc_str.c_str(), send_rpc_str.size(), 0)) {
+
+    // 4a. 发送编码后的帧
+    if (-1 == send(m_clientfd, wire_data.data(), wire_data.size(), 0)) {
       close(m_clientfd);
       m_clientfd = -1;
       controller->SetFailed("send error");
       return;
     }
 
-    // 5. 接收响应
-    // 格式：[4B Total Len] + [Response Data]
+    // 4b. 接收响应帧（协议相关读取）
+    //     Legacy: 先读 4B total_len → 读 total_len bytes
+    //     XRpc:   先读 16B fixed header → 读 (total_size-16) bytes
+    std::vector<char> frame_buf;
 
-    // A. 先读 4 字节长度头
-    uint32_t response_len = 0;
-    if (recv_exact(m_clientfd, (char*)&response_len, 4) != 4) {
-      close(m_clientfd);
-      m_clientfd = -1;
-      controller->SetFailed("recv response length error");
-      return;
-    }
-    response_len = ntohl(response_len);
-
-    // B. 根据长度读取 Body
-    std::vector<char> recv_buf(response_len);
-    if (recv_exact(m_clientfd, recv_buf.data(), response_len) != response_len) {
-      close(m_clientfd);
-      m_clientfd = -1;
-      controller->SetFailed("recv response body error");
-      return;
-    }
-
-    // 6. 反序列化响应
-    {
-      ScopedTimer des(RuntimeStats::DESERIALIZE_RES);
-      if (!response->ParseFromArray(recv_buf.data(), response_len)) {
+    if (_useXrpcProtocol) {
+      // 先读 16 字节固定头
+      FixedHeader fh;
+      ssize_t n = recv_exact(m_clientfd, (char*)&fh, kFixedHeaderSize);
+      if (n != kFixedHeaderSize) {
         close(m_clientfd);
         m_clientfd = -1;
-        controller->SetFailed("parse response error");
+        controller->SetFailed("recv response header error");
         return;
       }
+      fh.NToH();
+      if (!fh.IsValid() || fh.total_size > kMaxFrameSize || fh.total_size < kFixedHeaderSize) {
+        close(m_clientfd);
+        m_clientfd = -1;
+        controller->SetFailed("invalid response frame header");
+        return;
+      }
+
+      // 读剩余部分
+      size_t remaining = fh.total_size - kFixedHeaderSize;
+      frame_buf.resize(fh.total_size);
+      std::memcpy(frame_buf.data(), &fh, kFixedHeaderSize);
+      if (remaining > 0) {
+        n = recv_exact(m_clientfd, frame_buf.data() + kFixedHeaderSize, remaining);
+        if (n != static_cast<ssize_t>(remaining)) {
+          close(m_clientfd);
+          m_clientfd = -1;
+          controller->SetFailed("recv response body error");
+          return;
+        }
+      }
+    } else {
+      // Legacy 协议
+      uint32_t total_len_be = 0;
+      if (recv_exact(m_clientfd, (char*)&total_len_be, 4) != 4) {
+        close(m_clientfd);
+        m_clientfd = -1;
+        controller->SetFailed("recv response length error");
+        return;
+      }
+      uint32_t total_len = ntohl(total_len_be);
+      if (total_len > kMaxFrameSize) {
+        close(m_clientfd);
+        m_clientfd = -1;
+        controller->SetFailed("response too large");
+        return;
+      }
+
+      frame_buf.resize(4 + total_len);
+      std::memcpy(frame_buf.data(), &total_len_be, 4);
+      if (total_len > 0) {
+        ssize_t n = recv_exact(m_clientfd, frame_buf.data() + 4, total_len);
+        if (n != static_cast<ssize_t>(total_len)) {
+          close(m_clientfd);
+          m_clientfd = -1;
+          controller->SetFailed("recv response body error");
+          return;
+        }
+      }
+    }
+
+    // ---- 步骤 5: Codec 解码响应 ----
+    NoncontiguousBuffer resp_buf(frame_buf.data(), frame_buf.size());
+    ProtocolMessage resp_msg;
+    {
+      ScopedTimer des(RuntimeStats::DESERIALIZE_RES);
+      ClientContextPtr ctx_ptr = std::make_shared<ClientContext>(ctx);
+      int dec_ret = _clientCodec->ZeroCopyDecode(ctx_ptr, resp_buf, resp_msg);
+      if (dec_ret != kCodecOk) {
+        close(m_clientfd);
+        m_clientfd = -1;
+        controller->SetFailed("decode response error, code=" +
+                              std::to_string(dec_ret));
+        return;
+      }
+    }
+
+    // ---- 步骤 6: 反序列化到响应 Protobuf ----
+    if (!response->ParseFromString(resp_msg.body)) {
+      close(m_clientfd);
+      m_clientfd = -1;
+      controller->SetFailed("parse response error");
+      return;
     }
   }
 }
@@ -232,8 +284,12 @@ std::string RpcChannel::QueryServiceHost(ZookeeperClient* zkclient,
   return host_data_1;
 }
 
-// 构造函数，支持延迟连接
-RpcChannel::RpcChannel(bool connectNow) : m_clientfd(-1), m_idx(0) {
+// 构造函数，支持延迟连接 + 协议选择
+RpcChannel::RpcChannel(bool connectNow, bool useXrpc)
+    : m_clientfd(-1), m_idx(0), _useXrpcProtocol(useXrpc) {
+  // 根据协议版本创建对应 Codec
+  _clientCodec = CodecFactory::CreateClientCodec(useXrpc);
+
   if (!connectNow) {
     return;
   }
