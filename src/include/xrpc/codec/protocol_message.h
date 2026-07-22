@@ -4,7 +4,11 @@
 #include <string>
 #include "xrpc/codec/xrpc_codec.h"
 
-namespace xrpc {
+using xrpc::kCodecOk;
+using xrpc::ContentEncoding;
+using xrpc::ContentType;
+using xrpc::MessageType;
+using xrpc::StreamType;
 
 // ============================================================================
 // ProtocolMessage — 统一协议消息载体
@@ -61,5 +65,3 @@ class ProtocolMessage {
   bool IsResponse() const { return message_type == MessageType::kResponse; }
   bool IsOneway()   const { return message_type == MessageType::kOneway; }
 };
-
-}  // namespace xrpc

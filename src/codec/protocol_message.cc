@@ -1,7 +1,5 @@
 #include "xrpc/codec/protocol_message.h"
 
-namespace xrpc {
-
 void ProtocolMessage::Reset() {
   version          = ProtocolVersion::kXRpc;
   request_id       = 0;
@@ -23,5 +21,3 @@ void ProtocolMessage::Reset() {
   error_msg.clear();
   trans_info.clear();
 }
-
-}  // namespace xrpc

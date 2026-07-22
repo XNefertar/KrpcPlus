@@ -9,7 +9,25 @@
 #include "xrpc/codec/protocol_message.h"
 #include "xrpc/protocol/xrpc_protocol.pb.h"
 
-namespace xrpc {
+// Bring xrpc namespace types into scope
+using xrpc::ContentEncoding;
+using xrpc::ContentType;
+using xrpc::FixedHeader;
+using xrpc::MessageType;
+using xrpc::RequestProtocol;
+using xrpc::ResponseProtocol;
+using xrpc::StreamType;
+using xrpc::kCodecIncomplete;
+using xrpc::kCodecInternalError;
+using xrpc::kCodecInvalidMagic;
+using xrpc::kCodecOk;
+using xrpc::kCodecOversized;
+using xrpc::kCodecParseError;
+using xrpc::kCodecSerializeError;
+using xrpc::kFixedHeaderSize;
+using xrpc::kMagicNumber;
+using xrpc::kMaxFrameSize;
+using xrpc::kMinFrameSize;
 
 // ============================================================================
 // XRpcServerCodec — 新一代协议服务端编解码器
@@ -353,5 +371,3 @@ std::unique_ptr<ServerCodec> CreateXRpcServerCodec() {
 std::unique_ptr<ClientCodec> CreateXRpcClientCodec() {
   return std::make_unique<XRpcClientCodec>();
 }
-
-}  // namespace xrpc

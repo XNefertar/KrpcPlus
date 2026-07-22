@@ -6,6 +6,8 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 
+#include <google/protobuf/descriptor.h>
+#include <google/protobuf/message.h>
 #include <memory>
 
 #include "xrpc/codec/codec_factory.h"
@@ -18,6 +20,10 @@
 #include "xrpc/registry/load_balancer.h"
 #include "xrpc/registry/route_manager.h"
 #include "xrpc/registry/zookeeper_client.h"
+
+using xrpc::FixedHeader;
+using xrpc::kFixedHeaderSize;
+using xrpc::kMaxFrameSize;
 
 std::mutex g_data_mutx;  // 全局互斥锁，用于保护共享数据的线程安全
 
@@ -47,42 +53,55 @@ void RpcChannel::CallMethod(
   ScopedTimer total(RuntimeStats::TOTAL);
 
   // ---- 步骤 1: 懒初始化连接 + 服务发现 ----
-  if (-1 == m_clientfd) {
+  // 提取 service_name / method_name (无论是否走 ZK 都需要)
+  if (service_name.empty()) {
     const google::protobuf::ServiceDescriptor* sd = method->service();
     service_name = sd->name();
     method_name = method->name();
+  }
 
-    // [Stage 1] ZK_QUERY: ZooKeeper 连接 + 查路由表
-    ZookeeperClient zkCli;
-    {
-      ScopedTimer zk(RuntimeStats::ZK_QUERY);
-      zkCli.Start();
-    }
-
-    // 查询服务地址 (内部包含 getChildren + LB 选择)
-    std::string host_data;
-    {
-      ScopedTimer zk(RuntimeStats::ZK_QUERY);
-      host_data = QueryServiceHost(&zkCli, service_name, method_name, m_idx);
-    }
-
-    m_ip   = host_data.substr(0, m_idx);
-    m_port = atoi(host_data.substr(m_idx + 1, host_data.size() - m_idx).c_str());
-    std::cout << "ip: " << m_ip << ", port: " << m_port << std::endl;
-
-    // [Stage 2] CONNECT: TCP 建连耗时
-    bool connected;
-    {
+  if (-1 == m_clientfd) {
+    // 直连模式: m_ip 已预设，直接 connect
+    if (!m_ip.empty()) {
       ScopedTimer conn(RuntimeStats::CONNECT);
-      connected = newConnect(m_ip.c_str(), m_port);
-    }
+      if (!newConnect(m_ip.c_str(), m_port)) {
+        controller->SetFailed("direct connect error");
+        return;
+      }
+    } else {
+      // ZK 模式: 服务发现 + 负载均衡 + 连接
+      // [Stage 1] ZK_QUERY: ZooKeeper 连接 + 查路由表
+      ZookeeperClient zkCli;
+      {
+        ScopedTimer zk(RuntimeStats::ZK_QUERY);
+        zkCli.Start();
+      }
 
-    if (!connected) {
-      LOG(ERROR) << "connect server error";
-      controller->SetFailed("connect server error");
-      return;
-    }
-    LOG(INFO) << "connect server success";
+      // 查询服务地址 (内部包含 getChildren + LB 选择)
+      std::string host_data;
+      {
+        ScopedTimer zk(RuntimeStats::ZK_QUERY);
+        host_data = QueryServiceHost(&zkCli, service_name, method_name, m_idx);
+      }
+
+      m_ip   = host_data.substr(0, m_idx);
+      m_port = atoi(host_data.substr(m_idx + 1, host_data.size() - m_idx).c_str());
+      std::cout << "ip: " << m_ip << ", port: " << m_port << std::endl;
+
+      // [Stage 2] CONNECT: TCP 建连耗时
+      bool connected;
+      {
+        ScopedTimer conn(RuntimeStats::CONNECT);
+        connected = newConnect(m_ip.c_str(), m_port);
+      }
+
+      if (!connected) {
+        LOG(ERROR) << "connect server error";
+        controller->SetFailed("connect server error");
+        return;
+      }
+      LOG(INFO) << "connect server success";
+    }  // end ZK mode
   }
 
   // ---- 步骤 2: 序列化请求体 ----
@@ -322,5 +341,16 @@ RpcChannel::RpcChannel(bool connectNow, bool useXrpc)
   int count = 3;
   while (!rt && count--) {
     rt = newConnect(m_ip.c_str(), m_port);
+  }
+}
+
+// 直连模式构造函数: 跳过 ZK，直接连接指定地址
+RpcChannel::RpcChannel(const std::string& ip, uint16_t port, bool useXrpc)
+    : m_clientfd(-1), m_ip(ip), m_port(port), m_idx(0),
+      _useXrpcProtocol(useXrpc) {
+  _clientCodec = CodecFactory::CreateClientCodec(useXrpc);
+  // 直连模式: 立即建立连接
+  if (!newConnect(m_ip.c_str(), m_port)) {
+    LOG(ERROR) << "Direct connect to " << ip << ":" << port << " failed";
   }
 }
