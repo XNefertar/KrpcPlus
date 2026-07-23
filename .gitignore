@@ -56,3 +56,6 @@ bin/
 
 # vscode files
 .vscode
+
+# mac
+.DS_Store
