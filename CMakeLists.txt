@@ -11,7 +11,13 @@ find_package(Protobuf REQUIRED)
 include_directories(${Protobuf_INCLUDE_DIRS})
 
 # 设置全局链接库
-set(LIBS
+set(CLIENT_LIBS
+    protobuf
+    pthread
+    zookeeper_mt
+)
+
+set(SERVER_LIBS
     protobuf
     pthread
     zookeeper_mt

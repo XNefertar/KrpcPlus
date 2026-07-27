@@ -20,6 +20,8 @@ class RpcChannel : public google::protobuf::RpcChannel {
   // connectNow: 是否在构造时立即建立连接
   // useXrpc:   true=XRpc新协议, false=Legacy老协议
   explicit RpcChannel(bool connectNow, bool useXrpc = false);
+  // 直连模式: 跳过 ZooKeeper 服务发现，直接连接指定地址
+  RpcChannel(const std::string& ip, uint16_t port, bool useXrpc = false);
   virtual ~RpcChannel() {
     if (m_clientfd >= 0) {
       close(m_clientfd);

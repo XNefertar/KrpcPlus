@@ -3,9 +3,17 @@
 #include <arpa/inet.h>
 #include <cstring>
 
+#include "xrpc/codec/noncontiguous_buffer.h"
 #include "xrpc/codec/protocol_message.h"
 #include "xrpc/codec/xrpc_codec.h"
 #include "xrpc/protocol/rpc_header.pb.h"
+
+using xrpc::kCodecIncomplete;
+using xrpc::kCodecOk;
+using xrpc::kCodecOversized;
+using xrpc::kCodecParseError;
+using xrpc::kCodecSerializeError;
+using xrpc::kMaxFrameSize;
 
 // ============================================================================
 // LegacyServerCodec 实现
