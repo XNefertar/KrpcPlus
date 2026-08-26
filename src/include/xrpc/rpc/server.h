@@ -10,10 +10,12 @@
 
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 
 #include "xrpc/codec/codec.h"
+#include "xrpc/codec/protocol_message.h"
 
 // 前向声明
 class ZookeeperClient;
@@ -42,12 +44,14 @@ class RpcServer {
 
   // Codec 层：自动检测协议版本并解码/编码
   std::unique_ptr<ServerCodec> _serverCodec;
+  std::once_flag codec_init_flag_;
 
   void OnConnection(const muduo::net::TcpConnectionPtr& conn);
   void OnMessage(const muduo::net::TcpConnectionPtr& conn,
                  muduo::net::Buffer* buffer, muduo::Timestamp receive_time);
   void SendRpcResponse(const muduo::net::TcpConnectionPtr& conn,
-                       google::protobuf::Message* response);
+                       google::protobuf::Message* response,
+                       const ProtocolMessage& request_metadata);
 };
 
 #endif  // XRPC_RPC_SERVER_H_

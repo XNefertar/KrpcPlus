@@ -18,6 +18,25 @@ struct MuduoConnection : public Connection {
       : muduo_conn(std::move(c)) {}
 };
 
+namespace {
+// protobuf::Closure 的自删除实现，用于将请求/响应对象的生命周期
+// 精确绑定到业务 done->Run()。
+class FunctionClosure final : public google::protobuf::Closure {
+ public:
+  explicit FunctionClosure(std::function<void()> function)
+      : function_(std::move(function)) {}
+
+  void Run() override {
+    std::function<void()> function = std::move(function_);
+    delete this;
+    function();
+  }
+
+ private:
+  std::function<void()> function_;
+};
+}  // namespace
+
 // 注册服务对象及其方法，以便服务端能够处理客户端的 RPC 请求
 void RpcServer::NotifyService(google::protobuf::Service* service) {
   ServiceInfo service_info;
@@ -25,7 +44,7 @@ void RpcServer::NotifyService(google::protobuf::Service* service) {
   const google::protobuf::ServiceDescriptor* psd = service->GetDescriptor();
 
   // 获取服务的名字
-  std::string service_name = psd->name();
+  std::string service_name(psd->name());
   // 获取服务端对象 service 的方法数量
   int method_count = psd->method_count();
 
@@ -34,7 +53,7 @@ void RpcServer::NotifyService(google::protobuf::Service* service) {
   // 遍历服务中的所有方法，并注册到服务信息中
   for (int i = 0; i < method_count; ++i) {
     const google::protobuf::MethodDescriptor* pmd = psd->method(i);
-    std::string method_name = pmd->name();
+    std::string method_name(pmd->name());
     std::cout << "method_name=" << method_name << std::endl;
     service_info.method_map.emplace(method_name, pmd);
   }
@@ -112,11 +131,12 @@ void RpcServer::OnMessage(const muduo::net::TcpConnectionPtr& conn,
                            muduo::net::Buffer* buffer,
                            muduo::Timestamp receive_time) {
   // ---- 步骤 1: 首次收到消息时，自动检测协议并创建 Codec ----
-  if (!_serverCodec) {
+  if (buffer->readableBytes() < 2) return;
+  std::call_once(codec_init_flag_, [&] {
     NoncontiguousBuffer probe(buffer->peek(), buffer->readableBytes());
     _serverCodec = CodecFactory::CreateServerCodec(probe);
     LOG(INFO) << "ServerCodec created (auto-detected protocol)";
-  }
+  });
 
   // ---- 步骤 2: 连接适配器 ----
   auto conn_adapter = std::make_shared<MuduoConnection>(conn);
@@ -184,10 +204,20 @@ void RpcServer::OnMessage(const muduo::net::TcpConnectionPtr& conn,
         service->GetResponsePrototype(method).New();
 
     // 4c. 异步回调：业务执行完毕后调用 SendRpcResponse 编码并发送
-    google::protobuf::Closure* done = google::protobuf::NewCallback<
-        RpcServer, const muduo::net::TcpConnectionPtr&,
-        google::protobuf::Message*>(this, &RpcServer::SendRpcResponse, conn,
-                                     response);
+    ProtocolMessage request_metadata;
+    request_metadata.request_id = msg.request_id;
+    request_metadata.stream_id = msg.stream_id;
+    request_metadata.stream_type = msg.stream_type;
+    request_metadata.content_type = msg.content_type;
+    request_metadata.content_encoding = msg.content_encoding;
+
+    google::protobuf::Closure* done = new FunctionClosure(
+        [this, conn, request, response,
+         request_metadata = std::move(request_metadata)]() {
+          SendRpcResponse(conn, response, request_metadata);
+          delete request;
+          delete response;
+        });
 
     // 4d. 调用业务方法（同步执行在当前 IO 线程）
     service->CallMethod(method, nullptr, request, response, done);
@@ -196,7 +226,8 @@ void RpcServer::OnMessage(const muduo::net::TcpConnectionPtr& conn,
 
 // 发送 RPC 响应给客户端（使用 Codec 层编码）
 void RpcServer::SendRpcResponse(const muduo::net::TcpConnectionPtr& conn,
-                                 google::protobuf::Message* response) {
+                                 google::protobuf::Message* response,
+                                 const ProtocolMessage& request_metadata) {
   std::string response_str;
   if (!response->SerializeToString(&response_str)) {
     std::cout << "serialize response error!" << std::endl;
@@ -207,6 +238,11 @@ void RpcServer::SendRpcResponse(const muduo::net::TcpConnectionPtr& conn,
   ProtocolMessage resp_msg;
   resp_msg.body         = response_str;
   resp_msg.message_type = MessageType::kResponse;
+  resp_msg.request_id = request_metadata.request_id;
+  resp_msg.stream_id = request_metadata.stream_id;
+  resp_msg.stream_type = request_metadata.stream_type;
+  resp_msg.content_type = request_metadata.content_type;
+  resp_msg.content_encoding = request_metadata.content_encoding;
 
   // 通过 Codec 编码
   NoncontiguousBuffer out;

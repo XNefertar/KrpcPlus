@@ -28,7 +28,13 @@ file(GLOB PROTO_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/protocol/*.pb.cc)
 
 # 创建客户端核心静态库 (不依赖 muduo)
 add_library(xrpc_core STATIC ${SRC_FILES})
-target_link_libraries(xrpc_core PUBLIC protobuf)
+target_link_libraries(xrpc_core PUBLIC protobuf::libprotobuf)
+if(TARGET absl::absl_log)
+  target_link_libraries(xrpc_core PUBLIC
+      absl::absl_check
+      absl::absl_log
+      absl::hash)
+endif()
 target_include_directories(xrpc_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/include/xrpc/codec
