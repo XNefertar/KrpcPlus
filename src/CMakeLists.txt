@@ -24,7 +24,10 @@ set(SRC_FILES
 )
 
 # 获取 protobuf 的生成文件
-file(GLOB PROTO_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/protocol/*.pb.cc)
+file(GLOB PROTO_SRCS
+    ${CMAKE_CURRENT_SOURCE_DIR}/protocol/*.pb.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/xrpc/protocol/*.pb.cc)
+list(APPEND SRC_FILES ${PROTO_SRCS})
 
 # 创建客户端核心静态库 (不依赖 muduo)
 add_library(xrpc_core STATIC ${SRC_FILES})

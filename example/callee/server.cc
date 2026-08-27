@@ -12,9 +12,9 @@ UserService 原本是一个本地服务，提供了两个本地方法：Login �
 class UserService : public Kuser::UserServiceRpc {
  public:
   // 本地登录方法，用于处理实际的业务逻辑
-  bool Login(std::string name, std::string pwd) {
-    std::cout << "doing local service: Login" << std::endl;
-    std::cout << "name:" << name << " pwd:" << pwd << std::endl;
+  bool Login(const std::string& name, const std::string& pwd) {
+    (void)name;
+    (void)pwd;
     return true;
   }
 
@@ -24,9 +24,11 @@ class UserService : public Kuser::UserServiceRpc {
   2. 服务提供者（callee）接收到请求后，调用下面重写的 Login 方法。
   */
   // 本地注册方法
-  bool Register(uint32_t id, std::string name, std::string pwd) {
-    std::cout << "doing local service: Register" << std::endl;
-    std::cout << "id:" << id << " name:" << name << " pwd:" << pwd << std::endl;
+  bool Register(uint32_t id, const std::string& name,
+                const std::string& pwd) {
+    (void)id;
+    (void)name;
+    (void)pwd;
     return true;
   }
 

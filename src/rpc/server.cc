@@ -1,6 +1,10 @@
 #include "xrpc/rpc/server.h"
 
+#include <algorithm>
 #include <iostream>
+#include <thread>
+
+#include <google/protobuf/message.h>
 
 #include "xrpc/codec/codec_factory.h"
 #include "xrpc/codec/noncontiguous_buffer.h"
@@ -84,8 +88,20 @@ void RpcServer::Run() {
       std::bind(&RpcServer::OnMessage, this, std::placeholders::_1,
                 std::placeholders::_2, std::placeholders::_3));
 
-  // 设置 muduo 库的线程数量
-  server->setThreadNum(4);
+  // Worker 数可由 rpcserverthreads 或命令行 -t 配置；未配置时使用在线 CPU 核数。
+  const unsigned int hardware_threads = std::thread::hardware_concurrency();
+  int worker_threads = static_cast<int>(std::max(1u, hardware_threads));
+  const std::string configured_threads =
+      Application::GetInstance().GetConfig().Load("rpcserverthreads");
+  if (!configured_threads.empty()) {
+    try {
+      worker_threads = std::max(1, std::stoi(configured_threads));
+    } catch (const std::exception&) {
+      LOG(WARNING) << "Invalid rpcserverthreads='" << configured_threads
+                   << "', fallback to " << worker_threads;
+    }
+  }
+  server->setThreadNum(worker_threads);
 
   // 将当前 RPC 节点上要发布的服务全部注册到 ZooKeeper 上
   ZookeeperClient zkclient;
@@ -111,7 +127,7 @@ void RpcServer::Run() {
 
   // RPC 服务端准备启动
   std::cout << "RpcServer start service at ip:" << ip << " port:" << port
-            << std::endl;
+            << " workers:" << worker_threads << std::endl;
 
   // 启动网络服务
   server->start();
@@ -121,6 +137,10 @@ void RpcServer::Run() {
 // 连接回调函数，处理客户端连接事件
 void RpcServer::OnConnection(const muduo::net::TcpConnectionPtr& conn) {
   if (!conn->connected()) {
+    {
+      std::lock_guard<std::mutex> lock(connection_codecs_mutex_);
+      connection_codecs_.erase(conn->name());
+    }
     conn->shutdown();
   }
 }
@@ -130,13 +150,19 @@ void RpcServer::OnConnection(const muduo::net::TcpConnectionPtr& conn) {
 void RpcServer::OnMessage(const muduo::net::TcpConnectionPtr& conn,
                            muduo::net::Buffer* buffer,
                            muduo::Timestamp receive_time) {
-  // ---- 步骤 1: 首次收到消息时，自动检测协议并创建 Codec ----
+  // ---- 步骤 1: 首次收到消息时，为当前连接检测并创建 Codec ----
   if (buffer->readableBytes() < 2) return;
-  std::call_once(codec_init_flag_, [&] {
-    NoncontiguousBuffer probe(buffer->peek(), buffer->readableBytes());
-    _serverCodec = CodecFactory::CreateServerCodec(probe);
-    LOG(INFO) << "ServerCodec created (auto-detected protocol)";
-  });
+  std::shared_ptr<ServerCodec> server_codec;
+  {
+    std::lock_guard<std::mutex> lock(connection_codecs_mutex_);
+    auto& codec = connection_codecs_[conn->name()];
+    if (!codec) {
+      NoncontiguousBuffer probe(buffer->peek(), buffer->readableBytes());
+      codec = CodecFactory::CreateServerCodec(probe);
+      LOG(INFO) << "ServerCodec created for connection " << conn->name();
+    }
+    server_codec = codec;
+  }
 
   // ---- 步骤 2: 连接适配器 ----
   auto conn_adapter = std::make_shared<MuduoConnection>(conn);
@@ -147,7 +173,7 @@ void RpcServer::OnMessage(const muduo::net::TcpConnectionPtr& conn,
 
     // 3a. 检查是否有完整帧
     std::any metadata;
-    int frame_size = _serverCodec->CheckAndPick(conn_adapter, nbuf, metadata);
+    int frame_size = server_codec->CheckAndPick(conn_adapter, nbuf, metadata);
 
     if (frame_size == 0) {
       break;  // 半包，等待更多数据
@@ -161,7 +187,7 @@ void RpcServer::OnMessage(const muduo::net::TcpConnectionPtr& conn,
 
     // 3b. 解码完整帧 → ProtocolMessage
     ProtocolMessage msg;
-    int decode_ret = _serverCodec->ZeroCopyDecode(conn_adapter, nbuf, msg);
+    int decode_ret = server_codec->ZeroCopyDecode(conn_adapter, nbuf, msg);
     if (decode_ret != kCodecOk) {
       LOG(ERROR) << "Decode failed: " << decode_ret;
       conn->shutdown();
@@ -212,9 +238,9 @@ void RpcServer::OnMessage(const muduo::net::TcpConnectionPtr& conn,
     request_metadata.content_encoding = msg.content_encoding;
 
     google::protobuf::Closure* done = new FunctionClosure(
-        [this, conn, request, response,
+        [this, conn, server_codec, request, response,
          request_metadata = std::move(request_metadata)]() {
-          SendRpcResponse(conn, response, request_metadata);
+          SendRpcResponse(conn, server_codec, response, request_metadata);
           delete request;
           delete response;
         });
@@ -225,9 +251,11 @@ void RpcServer::OnMessage(const muduo::net::TcpConnectionPtr& conn,
 }
 
 // 发送 RPC 响应给客户端（使用 Codec 层编码）
-void RpcServer::SendRpcResponse(const muduo::net::TcpConnectionPtr& conn,
-                                 google::protobuf::Message* response,
-                                 const ProtocolMessage& request_metadata) {
+void RpcServer::SendRpcResponse(
+    const muduo::net::TcpConnectionPtr& conn,
+    const std::shared_ptr<ServerCodec>& server_codec,
+    google::protobuf::Message* response,
+    const ProtocolMessage& request_metadata) {
   std::string response_str;
   if (!response->SerializeToString(&response_str)) {
     std::cout << "serialize response error!" << std::endl;
@@ -247,7 +275,7 @@ void RpcServer::SendRpcResponse(const muduo::net::TcpConnectionPtr& conn,
   // 通过 Codec 编码
   NoncontiguousBuffer out;
   auto conn_adapter = std::make_shared<MuduoConnection>(conn);
-  int ret = _serverCodec->ZeroCopyEncode(conn_adapter, resp_msg, out);
+  int ret = server_codec->ZeroCopyEncode(conn_adapter, resp_msg, out);
 
   if (ret != kCodecOk) {
     std::cout << "encode response error: " << ret << std::endl;

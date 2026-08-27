@@ -17,12 +17,14 @@ void Application::Init(int argc, char** argv) {
   std::string config_file;
   std::string ip_override;
   std::string port_override;
+  std::string threads_override;
 
   // 使用 getopt 解析命令行参数
   // -i: 配置文件路径
   // -a: IP 地址覆盖 (Address)
   // -p: 端口覆盖 (Port)
-  while (-1 != (o = getopt(argc, argv, "i:a:p:"))) {
+  // -t: RPC 服务端 Worker 线程数覆盖
+  while (-1 != (o = getopt(argc, argv, "i:a:p:t:"))) {
     switch (o) {
       case 'i':  // -i 后的值为配置文件路径
         config_file = optarg;
@@ -33,12 +35,15 @@ void Application::Init(int argc, char** argv) {
       case 'p':
         port_override = optarg;
         break;
+      case 't':
+        threads_override = optarg;
+        break;
       case '?':  // 未知参数
-        std::cout << "格式: command -i <配置文件路径> [-a <ip>] [-p <port>]"
+        std::cout << "格式: command -i <配置文件路径> [-a <ip>] [-p <port>] [-t <threads>]"
                   << std::endl;
         exit(EXIT_FAILURE);
       case ':':  // 选项后缺参数
-        std::cout << "格式: command -i <配置文件路径> [-a <ip>] [-p <port>]"
+        std::cout << "格式: command -i <配置文件路径> [-a <ip>] [-p <port>] [-t <threads>]"
                   << std::endl;
         exit(EXIT_FAILURE);
       default:
@@ -55,6 +60,9 @@ void Application::Init(int argc, char** argv) {
   }
   if (!port_override.empty()) {
     m_config.Write("rpcserverport", port_override);
+  }
+  if (!threads_override.empty()) {
+    m_config.Write("rpcserverthreads", threads_override);
   }
 }
 
