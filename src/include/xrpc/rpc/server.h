@@ -10,10 +10,12 @@
 
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 
 #include "xrpc/codec/codec.h"
+#include "xrpc/codec/protocol_message.h"
 
 // 前向声明
 class ZookeeperClient;
@@ -40,14 +42,18 @@ class RpcServer {
   // 保存已注册的服务对象和 RPC 方法
   std::unordered_map<std::string, ServiceInfo> service_map;
 
-  // Codec 层：自动检测协议版本并解码/编码
-  std::unique_ptr<ServerCodec> _serverCodec;
+  // 每条连接独立保存协议 Codec，支持多核并发及同端口多协议连接。
+  std::mutex connection_codecs_mutex_;
+  std::unordered_map<std::string, std::shared_ptr<ServerCodec>>
+      connection_codecs_;
 
   void OnConnection(const muduo::net::TcpConnectionPtr& conn);
   void OnMessage(const muduo::net::TcpConnectionPtr& conn,
                  muduo::net::Buffer* buffer, muduo::Timestamp receive_time);
   void SendRpcResponse(const muduo::net::TcpConnectionPtr& conn,
-                       google::protobuf::Message* response);
+                       const std::shared_ptr<ServerCodec>& server_codec,
+                       google::protobuf::Message* response,
+                       const ProtocolMessage& request_metadata);
 };
 
 #endif  // XRPC_RPC_SERVER_H_
